@@ -1,0 +1,43 @@
+services:
+  app:
+    image: aiagentcomm-app-slim:latest
+    container_name: sfim-ai-agent
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      RAW_DATA_DIR: /app/data/raw
+      PROCESSED_DATA_DIR: /app/data/processed
+      CHROMA_DIR: /app/chromadb_store
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:5000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    volumes:
+      - ./data/raw:/app/data/raw
+      - ./data/processed:/app/data/processed
+      - ./chromadb_store:/app/chromadb_store
+
+  ingest:
+    image: aiagentcomm-app-slim:latest
+    container_name: sfim-ai-agent-ingest
+    profiles:
+      - ingest
+    restart: "no"
+    env_file:
+      - .env
+    environment:
+      RAW_DATA_DIR: /app/data/raw
+      PROCESSED_DATA_DIR: /app/data/processed
+      CHROMA_DIR: /app/chromadb_store
+    command: ["python", "-m", "app.cli", "ingest"]
+    volumes:
+      - ./data/raw:/app/data/raw
+      - ./data/processed:/app/data/processed
+      - ./chromadb_store:/app/chromadb_store
