@@ -1,4 +1,38 @@
 services:
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sfim-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    volumes:
+      - ollama_data:/root/.ollama
+
+  ollama-pull:
+    image: ollama/ollama:latest
+    container_name: sfim-ollama-pull
+    profiles:
+      - setup
+    restart: "no"
+    env_file:
+      - .env
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama pull ${OLLAMA_MODEL:-llama3.1}
+        ollama pull ${OLLAMA_EMBED_MODEL:-nomic-embed-text}
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+
   app:
     build: .
     image: aiagentcomm-app-slim:latest
@@ -14,9 +48,13 @@ services:
       GUNICORN_WORKERS: 2
       GUNICORN_TIMEOUT: 180
       MAX_CONTENT_LENGTH_MB: 2
+      OLLAMA_BASE_URL: http://ollama:11434
       RAW_DATA_DIR: /app/data/raw
       PROCESSED_DATA_DIR: /app/data/processed
       CHROMA_DIR: /app/chromadb_store
+    depends_on:
+      ollama:
+        condition: service_healthy
     ports:
       - "5000:5000"
     healthcheck:
@@ -44,9 +82,13 @@ services:
       FLASK_DEBUG: "0"
       LOG_LEVEL: INFO
       LOG_FORMAT: json
+      OLLAMA_BASE_URL: http://ollama:11434
       RAW_DATA_DIR: /app/data/raw
       PROCESSED_DATA_DIR: /app/data/processed
       CHROMA_DIR: /app/chromadb_store
+    depends_on:
+      ollama:
+        condition: service_healthy
     command: ["python", "-m", "app.cli", "ingest"]
     volumes:
       - raw_data:/app/data/raw
@@ -57,3 +99,4 @@ volumes:
   raw_data:
   processed_data:
   chroma_store:
+  ollama_data:

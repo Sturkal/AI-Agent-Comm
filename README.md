@@ -9,7 +9,7 @@ AI agent for SAP SuccessFactors Incentive Management (SFIM) that ingests officia
 - PDF chunking and indexing
 - Local vector store with ChromaDB-compatible storage
 - Flask webhook at `/webhook/whatsapp`
-- Ollama local LLM support through `http://host.docker.internal:11434`
+- Ollama local LLM support through the Docker `ollama` service (`http://ollama:11434`)
 - Self-evaluation notes stored as a lightweight JSONL knowledge memory
 - Dockerized runtime with `docker-compose`
 - Default hashing embeddings for deterministic local Docker runs, with optional `sentence-transformers`
@@ -110,9 +110,9 @@ python -m app.cli memory export --output exports/self_eval_memory.json
 
 ## Docker Notes
 
-- The current Docker Compose setup points the app to the host Ollama instance at `http://host.docker.internal:11434`.
-- This avoids conflicts with an existing local Ollama process already using port `11434`.
-- If you want Ollama fully containerized later, we can switch Compose back to a dedicated Ollama service after resolving the port conflict strategy.
+- Docker Compose now includes a dedicated `ollama` service. The app and ingest services call `http://ollama:11434` internally.
+- Run `docker compose --profile setup run --rm ollama-pull` once to download both the chat model (`OLLAMA_MODEL`) and embedding model (`OLLAMA_EMBED_MODEL`).
+- Ollama model data persists in the `ollama_data` volume.
 - Ingestion is now fully separate from Flask startup and runs through the dedicated `ingest` service or `python -m app.cli ingest`.
 - Self-evaluation memory defaults to `data/processed/self_eval_memory.jsonl` and is reused on later answers when the query overlaps.
 - Embeddings default to the lightweight hashing backend. If you later want higher semantic recall, set `EMBEDDING_BACKEND=sentence-transformers` and install the extra dependency.
@@ -144,6 +144,8 @@ The release bundle is saved as `dist/sap-sfim-ai-agent-prod-<timestamp>.tar.gz`.
 ## Useful Commands
 
 ```bash
+docker compose up -d ollama
+docker compose --profile setup run --rm ollama-pull
 docker compose --profile ingest run --rm ingest
 docker compose up -d
 docker compose -f docker-compose.prod.yml up -d --build

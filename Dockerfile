@@ -15,8 +15,10 @@ COPY requirements.txt .
 RUN python -m pip install -r requirements.txt
 
 COPY app ./app
-COPY data ./data
 COPY tests ./tests
+
+# data directories are mounted as volumes at runtime; create empty placeholders
+RUN mkdir -p data/raw data/processed chromadb_store
 
 EXPOSE 5000
 

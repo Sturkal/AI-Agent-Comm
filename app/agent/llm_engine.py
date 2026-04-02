@@ -58,8 +58,9 @@ class SFIMLLMEngine:
         }
 
     def answer(self, question: str, user_phone_number: Optional[str] = None) -> AgentResponse:
-        xml_hits = self._search_xml_first(question)
-        pdf_hits = self._search_pdf_if_needed(question, xml_hits)
+        search_query = self._translate_to_english(question)
+        xml_hits = self._search_xml_first(search_query)
+        pdf_hits = self._search_pdf_if_needed(search_query, xml_hits)
         refinement_memory = self.memory_store.format_context(question, xml_hits=xml_hits, limit=3)
         answer = self._generate_answer(
             question,
@@ -175,7 +176,10 @@ class SFIMLLMEngine:
                     "then the PDF context to explain variables and business meaning. "
                     "If the rule is not fully found, say what is missing. Keep answers concise, "
                     "clear, and suitable for WhatsApp. If self-evaluation memory is present, "
-                    "use it to avoid repeating previous weaknesses."
+                    "use it to avoid repeating previous weaknesses. "
+                    "IMPORTANT: Always respond in the SAME LANGUAGE as the user's question. "
+                    "If the user asks in Vietnamese, answer in Vietnamese. "
+                    "If the user asks in English, answer in English."
                 ),
                 user_prompt=(
                     f"User phone: {user_phone_number or 'unknown'}\n"
@@ -558,21 +562,54 @@ class SFIMLLMEngine:
             sections.append("PDF DOCS:\n" + "\n\n".join(hit.get("document", "") for hit in pdf_hits[:5]))
         return "\n\n".join(sections)
 
+    def _has_vietnamese(self, text: str) -> bool:
+        """Detect Vietnamese text by presence of diacritic characters."""
+        vi_chars = "àáảãạăắặẳẵặâấầẩẫậèéẻẽẹêếềểễệìíỉĩịòóỏõọôốồổỗộơớờởỡợùúủũụưứừửữựỳýỷỹỵđ"
+        lowered = text.lower()
+        return any(c in lowered for c in vi_chars)
+
+    def _translate_to_english(self, question: str) -> str:
+        """Translate a Vietnamese question to English for ChromaDB search.
+
+        The original question (in Vietnamese) is kept for answer generation so
+        the LLM can respond in the user's language.  Only the *search query*
+        should use the English translation.
+        """
+        if not self._has_vietnamese(question):
+            return question
+        system = "You are a translator. Translate the following question to English for SAP SFIM documentation search."
+        prompt = f"Return ONLY the English translation with no explanation.\n\nQuestion: {question}"
+        try:
+            translated = self._ask_ollama(system_prompt=system, user_prompt=prompt).strip()
+            if translated:
+                logger.debug("Translated query: '%s' -> '%s'", question, translated)
+                return translated
+        except Exception as exc:
+            logger.warning("Query translation failed, using original: %s", exc)
+        return question
+
     def _is_rule_question(self, question: str) -> bool:
         lowered = question.lower()
-        return any(
-            phrase in lowered
-            for phrase in (
-                "how is",
-                "how do",
-                "rule",
-                "formula",
-                "calculated",
-                "calculate",
-                "computed",
-                "computation",
-            )
+        en_phrases = (
+            "how is",
+            "how do",
+            "rule",
+            "formula",
+            "calculated",
+            "calculate",
+            "computed",
+            "computation",
         )
+        vi_phrases = (
+            "tính như thế nào",
+            "công thức",
+            "quy tắc",
+            "tính toán",
+            "được tính",
+            "cách tính",
+            "tính ra sao",
+        )
+        return any(phrase in lowered for phrase in en_phrases + vi_phrases)
 
 
 def build_default_engine() -> SFIMLLMEngine:

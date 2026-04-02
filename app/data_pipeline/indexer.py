@@ -8,6 +8,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 try:
     import chromadb
@@ -27,6 +29,35 @@ class IndexedRecord:
     id: str
     text: str
     metadata: Dict[str, Any]
+
+
+class OllamaEmbedder:
+    """Embedder that calls the Ollama /api/embeddings endpoint."""
+
+    def __init__(self, base_url: str, model: str = "nomic-embed-text") -> None:
+        self.base_url = base_url.rstrip("/")
+        self.model = model
+
+    def embed_one(self, text: str) -> List[float]:
+        payload = json.dumps({"model": self.model, "prompt": text}).encode("utf-8")
+        request = Request(
+            f"{self.base_url}/api/embeddings",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=30) as response:
+                body = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError) as exc:
+            raise RuntimeError(f"Ollama embedding request failed: {exc}") from exc
+        embedding = body.get("embedding")
+        if not embedding:
+            raise RuntimeError(f"Ollama returned no embedding for model '{self.model}'")
+        return embedding
+
+    def encode(self, texts: Sequence[str], normalize_embeddings: bool = True) -> List[List[float]]:
+        return [self.embed_one(text) for text in texts]
 
 
 class HashingEmbedder:
@@ -147,6 +178,7 @@ class ChromaIndexer:
         collection_name: str = "sfim_knowledge_base",
         embedding_backend: Optional[str] = None,
         embedding_model: Optional[str] = None,
+        ollama_base_url: Optional[str] = None,
     ) -> None:
         self.persist_dir = Path(persist_dir)
         self.persist_dir.mkdir(parents=True, exist_ok=True)
@@ -157,6 +189,7 @@ class ChromaIndexer:
             "EMBEDDING_MODEL",
             "sentence-transformers/all-MiniLM-L6-v2",
         )
+        self.ollama_base_url = ollama_base_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         self.embedder = self._load_embedder(self.embedding_backend, self.embedding_model)
 
     def index_xml_rules(self, parsed_rules: Sequence[Dict[str, Any]]) -> List[str]:
@@ -243,6 +276,12 @@ class ChromaIndexer:
     def _load_embedder(self, embedding_backend: str, embedding_model: str) -> Any:
         if embedding_backend in {"hashing", "lite", "default"}:
             return HashingEmbedder()
+
+        if embedding_backend == "ollama":
+            ollama_embed_model = os.getenv("OLLAMA_EMBED_MODEL", "nomic-embed-text")
+            embedder = OllamaEmbedder(base_url=self.ollama_base_url, model=ollama_embed_model)
+            logger.info("Using Ollama embedding backend: model=%s url=%s", ollama_embed_model, self.ollama_base_url)
+            return embedder
 
         if embedding_backend in {"sentence-transformers", "sentence_transformers", "transformers", "st"}:
             try:
